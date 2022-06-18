@@ -13,5 +13,8 @@ The invocation of the guest wasm module is as follows:
 5. The host invokes `event-handler()` function in the guest.
 6. The guest finishes execution.
 
+## Build and Run
+run `make build && make run`
+
 ## Future
 Think about a way to remove the `unsafe` block.
