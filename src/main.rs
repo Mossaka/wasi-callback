@@ -62,12 +62,6 @@ fn main() -> Result<()> {
             .get_typed_func::<(i32, i32), i32, _>(&mut (*(*store).as_ptr()), "main")?
             .call(&mut (*(*store).as_ptr()), (0, 0))?;
     }
-    // unsafe {
-    //     let mut store = &mut *Arc::into_raw(store);
-    //     instance
-    //         .get_typed_func::<(i32, i32), i32, _>(store, "main")?
-    //         .call(store, (0, 0))?;
-    // }
     Ok(())
 }
 

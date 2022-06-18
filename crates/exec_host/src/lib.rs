@@ -6,7 +6,7 @@ pub use exec::add_to_linker;
 pub struct ExecHost {}
 
 impl exec::Exec for ExecHost {
-    fn exec(&mut self,) -> () {
+    fn exec(&mut self) -> () {
         println!("executing in the host...");
     }
 }
