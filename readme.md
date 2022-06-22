@@ -17,4 +17,5 @@ The invocation of the guest wasm module is as follows:
 run `make build && make run`
 
 ## Future
-Think about a way to remove the `unsafe` block.
+- [x] Think about a way to remove the `unsafe` block.
+- [x] Make it thread-safe
