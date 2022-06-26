@@ -4,16 +4,15 @@ pub mod exec {
     use wit_bindgen_wasmtime::{anyhow, wasmtime};
 
     use crate::Context;
-    pub trait Exec: Sized {}
 
     pub fn add_to_linker(linker: &mut wasmtime::Linker<Context>) -> anyhow::Result<()> {
         linker.func_wrap(
             "exec",
             "exec",
-            move |mut caller: wasmtime::Caller<Context>| {
+            move |mut caller: wasmtime::Caller<'_, Context>| {
                 let store = caller.as_context();
-                let host = store.data().host.as_ref().unwrap();
-                let _res = host
+                let handler = store.data().host.as_ref().unwrap();
+                let _res = handler
                     .clone()
                     .lock()
                     .unwrap()

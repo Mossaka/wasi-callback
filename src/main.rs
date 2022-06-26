@@ -1,14 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use bindings::exec;
 use event_handler::{EventHandler, EventHandlerData};
+use host::exec;
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
-use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
+use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
 
-mod bindings;
+mod host;
 
 wit_bindgen_wasmtime::import!("event-handler.wit");
 
