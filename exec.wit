@@ -1,1 +1,4 @@
-exec: function() -> unit
+resource events {
+	static get: function() -> events
+	exec: function() -> unit
+}
