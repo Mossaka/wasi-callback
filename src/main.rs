@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use event_handler::{EventHandler, EventHandlerData};
-use host::exec;
+use host::exec::{self, ExecTables};
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
 use wasmtime::{Config, Engine, Linker, Module, Store};
@@ -15,7 +15,10 @@ wit_bindgen_wasmtime::import!("event-handler.wit");
 pub struct Context {
     pub wasi: WasiCtx,
     pub guest: EventHandlerData,
-    pub host: Option<Arc<Mutex<EventHandler<Self>>>>,
+    pub host: (
+        Option<Arc<Mutex<EventHandler<Self>>>>,
+        Option<Arc<Mutex<ExecTables>>>,
+    ),
 }
 
 fn main() -> Result<()> {
@@ -24,7 +27,7 @@ fn main() -> Result<()> {
     let ctx = Context {
         wasi,
         guest,
-        host: None,
+        host: (None, None),
     };
 
     let engine = Engine::new(&default_config()?)?;
@@ -38,7 +41,10 @@ fn main() -> Result<()> {
     let instance = linker.instantiate(&mut store, &module)?;
 
     let handler = EventHandler::new(&mut store, &instance, |cx: &mut Context| &mut cx.guest)?;
-    store.data_mut().host = Some(Arc::new(Mutex::new(handler)));
+    store.data_mut().host = (
+        Some(Arc::new(Mutex::new(handler))),
+        Some(Arc::new(Mutex::new(ExecTables::default()))),
+    );
     instance
         .get_typed_func::<(), (), _>(&mut store, "_start")?
         .call(&mut store, ())?;
