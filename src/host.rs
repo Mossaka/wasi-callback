@@ -16,16 +16,11 @@ pub mod exec {
     }
     use crate::Ctx;
 
+    #[derive(Default)]
     pub struct ExecTables {
         pub(crate) events_table: wit_bindgen_wasmtime::Table<()>,
     }
-    impl Default for ExecTables {
-        fn default() -> Self {
-            Self {
-                events_table: Default::default(),
-            }
-        }
-    }
+
     pub fn add_to_linker<T: Ctx + Exec>(
         linker: &mut wasmtime::Linker<T::Context>,
     ) -> anyhow::Result<()> {
