@@ -5,28 +5,12 @@ use event_handler::{EventHandler, EventHandlerData};
 use host::exec::{self, ExecTables};
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
-use wasmtime::{
-    Config, Engine, Global, GlobalType, Linker, Module, Mutability, Store, Val, ValType,
-};
+use wasmtime::{Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
 
 mod host;
 
 wit_bindgen_wasmtime::import!("event-handler.wit");
-
-pub struct Context {
-    pub wasi: WasiCtx,
-    pub host: (
-        Option<Arc<Mutex<EventHandler<Context2>>>>,
-        Option<Arc<Mutex<ExecTables>>>,
-        Option<Arc<Mutex<Store<Context2>>>>,
-    ),
-}
-
-pub struct Context2 {
-    pub wasi: WasiCtx,
-    pub guest: EventHandlerData,
-}
 
 fn main() -> Result<()> {
     let guest = EventHandlerData::default();
@@ -40,26 +24,30 @@ fn main() -> Result<()> {
         guest,
     };
 
-    let engine = Engine::new(&default_config()?)?;
-    let mut linker = Linker::new(&engine);
-    let mut linker2 = Linker::new(&engine);
-    let mut store = Store::new(&engine, ctx);
-    let mut store2 = Store::new(&engine, ctx2);
-    wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut Context| &mut cx.wasi)?;
-    wasmtime_wasi::add_to_linker(&mut linker2, |cx: &mut Context2| &mut cx.wasi)?;
+    let (_engine, mut linker, mut store, module) =
+        wasmtime_init(ctx, "target/wasm32-wasi/release/demo.wasm")?;
+    let (_engine2, mut linker2, mut store2, module2) =
+        wasmtime_init(ctx2, "target/wasm32-wasi/release/demo.wasm")?;
+
     exec::add_to_linker(&mut linker)?;
 
     // put dummy implementation to these import functions
-    let ty = GlobalType::new(ValType::I32, Mutability::Const);
-    let g = Global::new(&mut store, ty, Val::I32(0x1234))?;
-    linker2.define("exec", "events::get", g)?;
-    linker2.define("exec", "events::exec", g)?;
-    linker2.define("canonical_abi", "resource_drop_events", g)?;
+    linker2.func_wrap(
+        "exec",
+        "events::exec",
+        move |mut _caller: CallerCtx2, _arg0: i32| Ok(()),
+    )?;
+    linker2.func_wrap("exec", "events::get", move |mut _caller: CallerCtx2| {
+        Ok(0 as i32)
+    })?;
+    linker2.func_wrap(
+        "canonical_abi",
+        "resource_drop_events",
+        |mut _caller: CallerCtx2, _handle: u32| Ok(()),
+    )?;
 
-    let module = "./target/wasm32-wasi/release/demo.wasm";
-    let module = Module::from_file(&engine, module)?;
     let instance = linker.instantiate(&mut store, &module)?;
-    let instance2 = linker2.instantiate(&mut store2, &module)?;
+    let instance2 = linker2.instantiate(&mut store2, &module2)?;
 
     let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut Context2| &mut cx.guest)?;
     store.data_mut().host = (
@@ -92,3 +80,68 @@ pub fn default_wasi() -> Result<WasiCtx, StringArrayError> {
 
     Ok(ctx.build())
 }
+
+pub fn wasmtime_init<T>(
+    ctx: T,
+    path: &str,
+) -> Result<(Engine, Linker<T>, Store<T>, wasmtime::Module)>
+where
+    T: Ctx,
+{
+    let engine = Engine::new(&default_config()?)?;
+    let mut linker = Linker::new(&engine);
+    let store = Store::new(&engine, ctx);
+    wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut T| cx.wasi_mut())?;
+    let module = Module::from_file(&engine, path)?;
+    Ok((engine, linker, store, module))
+}
+
+pub trait Ctx {
+    type Data;
+    fn wasi_mut(&mut self) -> &mut WasiCtx;
+    fn data_mut(&mut self) -> &mut Self::Data;
+}
+
+pub struct Context {
+    pub wasi: WasiCtx,
+    pub host: (
+        Option<Arc<Mutex<EventHandler<Context2>>>>,
+        Option<Arc<Mutex<ExecTables>>>,
+        Option<Arc<Mutex<Store<Context2>>>>,
+    ),
+}
+
+impl Ctx for Context {
+    type Data = (
+        Option<Arc<Mutex<EventHandler<Context2>>>>,
+        Option<Arc<Mutex<ExecTables>>>,
+        Option<Arc<Mutex<Store<Context2>>>>,
+    );
+
+    fn wasi_mut(&mut self) -> &mut WasiCtx {
+        &mut self.wasi
+    }
+
+    fn data_mut(&mut self) -> &mut Self::Data {
+        &mut self.host
+    }
+}
+
+pub struct Context2 {
+    pub wasi: WasiCtx,
+    pub guest: EventHandlerData,
+}
+
+impl Ctx for Context2 {
+    type Data = EventHandlerData;
+
+    fn wasi_mut(&mut self) -> &mut WasiCtx {
+        &mut self.wasi
+    }
+
+    fn data_mut(&mut self) -> &mut Self::Data {
+        &mut self.guest
+    }
+}
+
+type CallerCtx2<'a> = wasmtime::Caller<'a, Context2>;
