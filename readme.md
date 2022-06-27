@@ -16,6 +16,8 @@ The invocation of the guest wasm module is as follows:
 ## Build and Run
 run `make build && make run`
 
+![out](output.jpg)
+
 ## Future
 - [x] Think about a way to remove the `unsafe` block.
 - [x] Make it thread-safe
