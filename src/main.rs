@@ -1,11 +1,15 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    ops::DerefMut,
+    sync::{Arc, Mutex},
+    thread,
+};
 
 use anyhow::Result;
 use event_handler::{EventHandler, EventHandlerData};
-use host::exec::{self, ExecTables};
+use host::exec::{self, Exec, ExecTables};
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
 
 mod host;
@@ -14,12 +18,12 @@ wit_bindgen_wasmtime::import!("event-handler.wit");
 
 fn main() -> Result<()> {
     let guest = EventHandlerData::default();
-    let ctx = Context {
+    let ctx = HostContext {
         wasi: default_wasi()?,
         host: (None, None, None),
     };
 
-    let ctx2 = Context2 {
+    let ctx2 = GuestContext {
         wasi: default_wasi()?,
         guest,
     };
@@ -29,7 +33,7 @@ fn main() -> Result<()> {
     let (mut linker2, mut store2, module2) =
         wasmtime_init(&engine, ctx2, "target/wasm32-wasi/release/demo.wasm")?;
 
-    exec::add_to_linker(&mut linker)?;
+    exec::add_to_linker::<HostContext>(&mut linker)?;
 
     // put dummy implementation to these import functions
     linker2.func_wrap(
@@ -49,7 +53,9 @@ fn main() -> Result<()> {
     let instance = linker.instantiate(&mut store, &module)?;
     let instance2 = linker2.instantiate(&mut store2, &module2)?;
 
-    let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut Context2| &mut cx.guest)?;
+    let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut GuestContext| {
+        &mut cx.guest
+    })?;
     store.data_mut().host = (
         Some(Arc::new(Mutex::new(handler))),
         Some(Arc::new(Mutex::new(ExecTables::default()))),
@@ -102,21 +108,13 @@ pub trait Ctx {
     fn data_mut(&mut self) -> &mut Self::Data;
 }
 
-pub struct Context {
+pub struct HostContext {
     pub wasi: WasiCtx,
-    pub host: (
-        Option<Arc<Mutex<EventHandler<Context2>>>>,
-        Option<Arc<Mutex<ExecTables>>>,
-        Option<Arc<Mutex<Store<Context2>>>>,
-    ),
+    pub host: HostData,
 }
 
-impl Ctx for Context {
-    type Data = (
-        Option<Arc<Mutex<EventHandler<Context2>>>>,
-        Option<Arc<Mutex<ExecTables>>>,
-        Option<Arc<Mutex<Store<Context2>>>>,
-    );
+impl Ctx for HostContext {
+    type Data = HostData;
 
     fn wasi_mut(&mut self) -> &mut WasiCtx {
         &mut self.wasi
@@ -127,12 +125,64 @@ impl Ctx for Context {
     }
 }
 
-pub struct Context2 {
+impl Exec for HostContext {
+    type Context = Self;
+
+    fn events_get(caller: wasmtime::Caller<'_, Self::Context>) -> Result<i32, wasmtime::Trap> {
+        let store = caller.as_context();
+        let _tables = store.data().host.1.as_ref().unwrap();
+        let handle = _tables.clone().lock().unwrap().events_table.insert(());
+        Ok(handle as i32)
+    }
+
+    fn events_exec(
+        mut caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+    ) -> Result<(), wasmtime::Trap> {
+        let mut thread_handles = vec![];
+        for i in 0..10 {
+            let store = caller.as_context();
+            let handler = store.data().host.0.as_ref().unwrap().clone();
+            let mut store = caller.as_context_mut();
+            let store = store.data_mut().host.2.as_mut().unwrap().clone();
+            thread_handles.push(thread::spawn(move || {
+                let mut store = store.lock().unwrap();
+                let _res = handler
+                    .lock()
+                    .unwrap()
+                    .event_handler(store.deref_mut(), format!("event-{i}").as_str());
+            }));
+        }
+        for handle in thread_handles {
+            handle.join().unwrap();
+        }
+        Ok(())
+    }
+
+    fn drop_events(
+        caller: wasmtime::Caller<'_, Self::Context>,
+        handle: u32,
+    ) -> Result<(), wasmtime::Trap> {
+        let store = caller.as_context();
+        let _tables = store.data().host.1.as_ref().unwrap();
+        _tables
+            .clone()
+            .lock()
+            .unwrap()
+            .events_table
+            .remove(handle)
+            .map_err(|e| wasmtime::Trap::new(format!("failed to remove handle: {}", e)))?;
+        drop(handle);
+        Ok(())
+    }
+}
+
+pub struct GuestContext {
     pub wasi: WasiCtx,
     pub guest: EventHandlerData,
 }
 
-impl Ctx for Context2 {
+impl Ctx for GuestContext {
     type Data = EventHandlerData;
 
     fn wasi_mut(&mut self) -> &mut WasiCtx {
@@ -144,4 +194,32 @@ impl Ctx for Context2 {
     }
 }
 
-type CallerCtx2<'a> = wasmtime::Caller<'a, Context2>;
+impl Exec for GuestContext {
+    type Context = Self;
+
+    fn events_get(_caller: wasmtime::Caller<'_, Self::Context>) -> Result<i32, wasmtime::Trap> {
+        Ok(0)
+    }
+
+    fn events_exec(
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+    ) -> Result<(), wasmtime::Trap> {
+        Ok(())
+    }
+
+    fn drop_events(
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _handle: u32,
+    ) -> Result<(), wasmtime::Trap> {
+        Ok(())
+    }
+}
+
+type CallerCtx2<'a> = wasmtime::Caller<'a, GuestContext>;
+type GuestStore = Store<GuestContext>;
+type HostData = (
+    Option<Arc<Mutex<EventHandler<GuestContext>>>>,
+    Option<Arc<Mutex<ExecTables>>>,
+    Option<Arc<Mutex<GuestStore>>>,
+);
