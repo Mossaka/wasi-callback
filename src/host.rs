@@ -37,7 +37,7 @@ pub mod exec {
         linker.func_wrap(
             "exec",
             "events::exec",
-            move |mut caller: wasmtime::Caller<'_, T::Context>, _arg0: i32| {
+            move |caller: wasmtime::Caller<'_, T::Context>, _arg0: i32| {
                 T::events_exec(caller, _arg0)
             },
         )?;
