@@ -38,7 +38,7 @@ fn main() -> Result<()> {
         move |mut _caller: CallerCtx2, _arg0: i32| Ok(()),
     )?;
     linker2.func_wrap("exec", "events::get", move |mut _caller: CallerCtx2| {
-        Ok(0 as i32)
+        Ok(0_i32)
     })?;
     linker2.func_wrap(
         "canonical_abi",
