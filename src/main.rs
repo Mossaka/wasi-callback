@@ -23,11 +23,11 @@ fn main() -> Result<()> {
         wasi: default_wasi()?,
         guest,
     };
-
-    let (_engine, mut linker, mut store, module) =
-        wasmtime_init(ctx, "target/wasm32-wasi/release/demo.wasm")?;
-    let (_engine2, mut linker2, mut store2, module2) =
-        wasmtime_init(ctx2, "target/wasm32-wasi/release/demo.wasm")?;
+    let engine = Engine::new(&default_config()?)?;
+    let (mut linker, mut store, module) =
+        wasmtime_init(&engine, ctx, "target/wasm32-wasi/release/demo.wasm")?;
+    let (mut linker2, mut store2, module2) =
+        wasmtime_init(&engine, ctx2, "target/wasm32-wasi/release/demo.wasm")?;
 
     exec::add_to_linker(&mut linker)?;
 
@@ -82,18 +82,18 @@ pub fn default_wasi() -> Result<WasiCtx, StringArrayError> {
 }
 
 pub fn wasmtime_init<T>(
+    engine: &Engine,
     ctx: T,
     path: &str,
-) -> Result<(Engine, Linker<T>, Store<T>, wasmtime::Module)>
+) -> Result<(Linker<T>, Store<T>, wasmtime::Module)>
 where
     T: Ctx,
 {
-    let engine = Engine::new(&default_config()?)?;
-    let mut linker = Linker::new(&engine);
-    let store = Store::new(&engine, ctx);
+    let mut linker = Linker::new(engine);
+    let store = Store::new(engine, ctx);
     wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut T| cx.wasi_mut())?;
-    let module = Module::from_file(&engine, path)?;
-    Ok((engine, linker, store, module))
+    let module = Module::from_file(engine, path)?;
+    Ok((linker, store, module))
 }
 
 pub trait Ctx {
