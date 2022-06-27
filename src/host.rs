@@ -1,4 +1,6 @@
 pub mod exec {
+    use crossbeam_utils::thread;
+
     use wasmtime::{AsContext, AsContextMut};
     #[allow(unused_imports)]
     use wit_bindgen_wasmtime::{anyhow, wasmtime};
@@ -31,12 +33,23 @@ pub mod exec {
             "events::exec",
             move |mut caller: wasmtime::Caller<'_, Context>, arg0: i32| {
                 let store = caller.as_context();
-                let handler = store.data().host.0.as_ref().unwrap();
-                let _res = handler
-                    .clone()
-                    .lock()
-                    .unwrap()
-                    .event_handler(caller.as_context_mut(), "event-a");
+                let handler = store.data().host.0.as_ref().unwrap().clone();
+                thread::scope(|s| {
+                    let thread_handle = s.spawn(|_| {
+                        let handler = handler.lock().unwrap();
+                        match handler.event_handler(caller.as_context_mut(), "event-a") {
+                            Ok(s) => (),
+                            Err(e) => {
+                                dbg!("{}", e);
+                                // stackOverflow instruction trap
+                            }
+                        };
+                    });
+                    // Join the thread and retrieve its result.
+                    thread_handle.join().unwrap();
+                })
+                .unwrap();
+
                 Ok(())
             },
         )?;
