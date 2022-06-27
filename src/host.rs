@@ -1,4 +1,6 @@
 pub mod exec {
+    use std::{ops::DerefMut, thread};
+
     use wasmtime::{AsContext, AsContextMut};
     #[allow(unused_imports)]
     use wit_bindgen_wasmtime::{anyhow, wasmtime};
@@ -31,12 +33,16 @@ pub mod exec {
             "events::exec",
             move |mut caller: wasmtime::Caller<'_, Context>, arg0: i32| {
                 let store = caller.as_context();
-                let handler = store.data().host.0.as_ref().unwrap();
-                let _res = handler
-                    .clone()
-                    .lock()
-                    .unwrap()
-                    .event_handler(caller.as_context_mut(), "event-a");
+                let handler = store.data().host.0.as_ref().unwrap().clone();
+                let mut store = caller.as_context_mut();
+                let store = store.data_mut().host.2.as_mut().unwrap().clone();
+                thread::spawn(move || {
+                    let mut store = store.lock().unwrap();
+                    let _res = handler
+                        .lock()
+                        .unwrap()
+                        .event_handler(store.deref_mut(), "event-a");
+                });
                 Ok(())
             },
         )?;
