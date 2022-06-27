@@ -28,31 +28,11 @@ fn main() -> Result<()> {
         guest,
     };
     let engine = Engine::new(&default_config()?)?;
-    let (mut linker, mut store, module) =
-        wasmtime_init(&engine, ctx, "target/wasm32-wasi/release/demo.wasm")?;
-    let (mut linker2, mut store2, module2) =
-        wasmtime_init(&engine, ctx2, "target/wasm32-wasi/release/demo.wasm")?;
-
-    exec::add_to_linker::<HostContext>(&mut linker)?;
+    let path = "target/wasm32-wasi/release/demo.wasm";
+    let (mut store, instance) = wasmtime_init(&engine, ctx, path)?;
+    let (mut store2, instance2) = wasmtime_init(&engine, ctx2, path)?;
 
     // put dummy implementation to these import functions
-    linker2.func_wrap(
-        "exec",
-        "events::exec",
-        move |mut _caller: CallerCtx2, _arg0: i32| Ok(()),
-    )?;
-    linker2.func_wrap("exec", "events::get", move |mut _caller: CallerCtx2| {
-        Ok(0_i32)
-    })?;
-    linker2.func_wrap(
-        "canonical_abi",
-        "resource_drop_events",
-        |mut _caller: CallerCtx2, _handle: u32| Ok(()),
-    )?;
-
-    let instance = linker.instantiate(&mut store, &module)?;
-    let instance2 = linker2.instantiate(&mut store2, &module2)?;
-
     let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut GuestContext| {
         &mut cx.guest
     })?;
@@ -91,15 +71,17 @@ pub fn wasmtime_init<T>(
     engine: &Engine,
     ctx: T,
     path: &str,
-) -> Result<(Linker<T>, Store<T>, wasmtime::Module)>
+) -> Result<(Store<T>, wasmtime::Instance)>
 where
-    T: Ctx,
+    T: Ctx + Exec<Context = T>,
 {
     let mut linker = Linker::new(engine);
-    let store = Store::new(engine, ctx);
+    let mut store = Store::new(engine, ctx);
     wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut T| cx.wasi_mut())?;
     let module = Module::from_file(engine, path)?;
-    Ok((linker, store, module))
+    exec::add_to_linker::<T>(&mut linker)?;
+    let instance = linker.instantiate(&mut store, &module)?;
+    Ok((store, instance))
 }
 
 pub trait Ctx {
@@ -216,7 +198,6 @@ impl Exec for GuestContext {
     }
 }
 
-type CallerCtx2<'a> = wasmtime::Caller<'a, GuestContext>;
 type GuestStore = Store<GuestContext>;
 type HostData = (
     Option<Arc<Mutex<EventHandler<GuestContext>>>>,
