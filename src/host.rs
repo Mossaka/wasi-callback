@@ -32,17 +32,23 @@ pub mod exec {
             "exec",
             "events::exec",
             move |mut caller: wasmtime::Caller<'_, Context>, _arg0: i32| {
-                let store = caller.as_context();
-                let handler = store.data().host.0.as_ref().unwrap().clone();
-                let mut store = caller.as_context_mut();
-                let store = store.data_mut().host.2.as_mut().unwrap().clone();
-                thread::spawn(move || {
-                    let mut store = store.lock().unwrap();
-                    let _res = handler
-                        .lock()
-                        .unwrap()
-                        .event_handler(store.deref_mut(), "event-a");
-                });
+                let mut thread_handles = vec![];
+                for i in 0..10 {
+                    let store = caller.as_context();
+                    let handler = store.data().host.0.as_ref().unwrap().clone();
+                    let mut store = caller.as_context_mut();
+                    let store = store.data_mut().host.2.as_mut().unwrap().clone();
+                    thread_handles.push(thread::spawn(move || {
+                        let mut store = store.lock().unwrap();
+                        let _res = handler
+                            .lock()
+                            .unwrap()
+                            .event_handler(store.deref_mut(), format!("event-{i}").as_str());
+                    }));
+                }
+                for handle in thread_handles {
+                    handle.join().unwrap();
+                }
                 Ok(())
             },
         )?;

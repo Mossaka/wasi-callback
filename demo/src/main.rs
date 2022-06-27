@@ -4,7 +4,7 @@ wit_bindgen_rust::export!("../event-handler.wit");
 fn main() {
     println!("executing in the guest...");
     let events = exec::Events::get();
-    for _ in 0..10 {
+    for _ in 0..2 {
         events.exec();
     }
     println!("finishing in the guest...")
