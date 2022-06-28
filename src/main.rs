@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
+use as_any::{AsAny, Downcast};
 use event_handler::{EventHandler, EventHandlerData};
 use events::{self, Exec, ExecTables};
 use wasi_cap_std_sync::WasiCtxBuilder;
@@ -19,7 +20,7 @@ fn main() -> Result<()> {
     let guest = EventHandlerData::default();
     let ctx = HostContext {
         wasi: default_wasi()?,
-        host: (None, None, None),
+        host: Default::default(),
     };
 
     let ctx2 = GuestContext {
@@ -35,11 +36,8 @@ fn main() -> Result<()> {
     let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut GuestContext| {
         &mut cx.guest
     })?;
-    store.data_mut().host = (
-        Some(Arc::new(Mutex::new(handler))),
-        Some(Arc::new(Mutex::new(ExecTables::default()))),
-        Some(Arc::new(Mutex::new(store2))),
-    );
+    let host_state: Vec<i32> = vec![];
+    store.data_mut().host = HostData::new(handler, ExecTables::default(), store2, host_state);
     instance
         .get_typed_func::<(), (), _>(&mut store, "_start")?
         .call(&mut store, ())?;
@@ -89,13 +87,13 @@ pub trait Ctx {
     fn data_mut(&mut self) -> &mut Self::Data;
 }
 
-pub struct HostContext {
+pub struct HostContext<T> {
     pub wasi: WasiCtx,
-    pub host: HostData,
+    pub host: HostData<T>,
 }
 
-impl Ctx for HostContext {
-    type Data = HostData;
+impl<T> Ctx for HostContext<T> {
+    type Data = HostData<T>;
 
     fn wasi_mut(&mut self) -> &mut WasiCtx {
         &mut self.wasi
@@ -106,7 +104,7 @@ impl Ctx for HostContext {
     }
 }
 
-impl Exec for HostContext {
+impl<T: 'static> Exec for HostContext<T> {
     type Context = Self;
 
     fn events_get(
@@ -116,7 +114,7 @@ impl Exec for HostContext {
         let memory = &get_memory(&mut caller, "memory")?;
         let _store = caller.as_context();
         let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-        let _tables = data.host.1.as_ref().unwrap();
+        let _tables = data.host.exec_tables.as_ref().unwrap();
         caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
         caller_memory.store(
             arg0 + 4,
@@ -128,15 +126,25 @@ impl Exec for HostContext {
     }
 
     fn events_listen(
-        _caller: wasmtime::Caller<'_, Self::Context>,
-        _arg0: i32,
+        mut caller: wasmtime::Caller<'_, Self::Context>,
+        arg0: i32,
         _arg1: i32,
         _arg2: i32,
         _arg3: i32,
         _arg4: i32,
         _arg5: i32,
     ) -> Result<(), wasmtime::Trap> {
-        todo!()
+        let mut store = caller.as_context_mut();
+        store
+            .data_mut()
+            .host
+            .host_state
+            .as_mut()
+            .unwrap()
+            .downcast_mut::<&mut Vec<i32>>()
+            .unwrap()
+            .push(arg0);
+        Ok(())
     }
 
     fn events_exec(
@@ -149,9 +157,9 @@ impl Exec for HostContext {
         let mut thread_handles = vec![];
         for i in 0..10 {
             let store = caller.as_context();
-            let handler = store.data().host.0.as_ref().unwrap().clone();
+            let handler = store.data().host.event_handler.as_ref().unwrap().clone();
             let mut store = caller.as_context_mut();
-            let store = store.data_mut().host.2.as_mut().unwrap().clone();
+            let store = store.data_mut().host.guest_store.as_mut().unwrap().clone();
             thread_handles.push(thread::spawn(move || {
                 let mut store = store.lock().unwrap();
                 let _res = handler
@@ -173,7 +181,7 @@ impl Exec for HostContext {
         handle: u32,
     ) -> Result<(), wasmtime::Trap> {
         let store = caller.as_context();
-        let _tables = store.data().host.1.as_ref().unwrap();
+        let _tables = store.data().host.exec_tables.as_ref().unwrap();
         _tables
             .clone()
             .lock()
@@ -243,8 +251,26 @@ impl Exec for GuestContext {
 }
 
 type GuestStore = Store<GuestContext>;
-type HostData = (
-    Option<Arc<Mutex<EventHandler<GuestContext>>>>,
-    Option<Arc<Mutex<ExecTables>>>,
-    Option<Arc<Mutex<GuestStore>>>,
-);
+#[derive(Default)]
+pub struct HostData<T> {
+    pub event_handler: Option<Arc<Mutex<EventHandler<GuestContext>>>>,
+    pub exec_tables: Option<Arc<Mutex<ExecTables>>>,
+    pub guest_store: Option<Arc<Mutex<GuestStore>>>,
+    pub host_state: Option<T>,
+}
+
+impl<T> HostData<T> {
+    pub fn new(
+        event_handler: EventHandler<GuestContext>,
+        exec_tables: ExecTables,
+        guest_store: GuestStore,
+        host_state: T,
+    ) -> Self {
+        Self {
+            event_handler: Some(Arc::new(Mutex::new(event_handler))),
+            exec_tables: Some(Arc::new(Mutex::new(exec_tables))),
+            guest_store: Some(Arc::new(Mutex::new(guest_store))),
+            host_state: Some(host_state),
+        }
+    }
+}
