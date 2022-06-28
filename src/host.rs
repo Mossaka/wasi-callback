@@ -1,4 +1,4 @@
-pub mod exec {
+pub mod events {
     use wasmtime::Trap;
     #[allow(unused_imports)]
     use wit_bindgen_wasmtime::{anyhow, wasmtime};
@@ -30,7 +30,7 @@ pub mod exec {
         }
     }
     pub trait Exec: Sized {
-        type Context: Ctx;
+        type Context;
         fn events_get(caller: wasmtime::Caller<'_, Self::Context>, _arg0: i32) -> Result<(), Trap>;
 
         fn events_listen(
@@ -55,22 +55,17 @@ pub mod exec {
             handle: u32,
         ) -> Result<(), Trap>;
     }
-    use crate::Ctx;
 
     #[derive(Default)]
     pub struct ExecTables {
         pub(crate) events_table: wit_bindgen_wasmtime::Table<()>,
     }
 
-    pub fn add_to_linker<T: Ctx + Exec>(
-        linker: &mut wasmtime::Linker<T::Context>,
-    ) -> anyhow::Result<()> {
+    pub fn add_to_linker<T: Exec>(linker: &mut wasmtime::Linker<T::Context>) -> anyhow::Result<()> {
         linker.func_wrap(
             "exec",
             "events::get",
-            move |caller: wasmtime::Caller<'_, T::Context>, arg0: i32| {
-                T::events_get(caller, arg0)
-            },
+            move |caller: wasmtime::Caller<'_, T::Context>, arg0: i32| T::events_get(caller, arg0),
         )?;
         linker.func_wrap(
             "exec",

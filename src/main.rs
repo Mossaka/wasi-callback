@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use event_handler::{EventHandler, EventHandlerData};
-use host::exec::{self, Exec, ExecTables};
+use host::events::{self, Exec, ExecTables};
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
 use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
@@ -80,7 +80,7 @@ where
     let mut store = Store::new(engine, ctx);
     wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut T| cx.wasi_mut())?;
     let module = Module::from_file(engine, path)?;
-    exec::add_to_linker::<T>(&mut linker)?;
+    events::add_to_linker::<T>(&mut linker)?;
     let instance = linker.instantiate(&mut store, &module)?;
     Ok((store, instance))
 }
