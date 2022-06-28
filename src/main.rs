@@ -111,37 +111,6 @@ impl Ctx for HostContext {
 impl Exec for HostContext {
     type Context = Self;
 
-    // fn events_get(caller: wasmtime::Caller<'_, Self::Context>) -> Result<i32, wasmtime::Trap> {
-    //     let store = caller.as_context();
-    //     let _tables = store.data().host.1.as_ref().unwrap();
-    //     let handle = _tables.clone().lock().unwrap().events_table.insert(());
-    //     Ok(handle as i32)
-    // }
-
-    // fn events_exec(
-    //     mut caller: wasmtime::Caller<'_, Self::Context>,
-    //     _arg0: i32,
-    // ) -> Result<(), wasmtime::Trap> {
-    //     let mut thread_handles = vec![];
-    //     for i in 0..10 {
-    //         let store = caller.as_context();
-    //         let handler = store.data().host.0.as_ref().unwrap().clone();
-    //         let mut store = caller.as_context_mut();
-    //         let store = store.data_mut().host.2.as_mut().unwrap().clone();
-    //         thread_handles.push(thread::spawn(move || {
-    //             let mut store = store.lock().unwrap();
-    //             let _res = handler
-    //                 .lock()
-    //                 .unwrap()
-    //                 .event_handler(store.deref_mut(), format!("event-{i}").as_str());
-    //         }));
-    //     }
-    //     for handle in thread_handles {
-    //         handle.join().unwrap();
-    //     }
-    //     Ok(())
-    // }
-
     fn events_get(
         mut caller: wasmtime::Caller<'_, Self::Context>,
         arg0: i32,
