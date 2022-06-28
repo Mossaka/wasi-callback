@@ -11,6 +11,7 @@ use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
 use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
+use wit_bindgen_wasmtime::rt::{get_memory, RawMem};
 
 mod host;
 
@@ -110,17 +111,74 @@ impl Ctx for HostContext {
 impl Exec for HostContext {
     type Context = Self;
 
-    fn events_get(caller: wasmtime::Caller<'_, Self::Context>) -> Result<i32, wasmtime::Trap> {
-        let store = caller.as_context();
-        let _tables = store.data().host.1.as_ref().unwrap();
-        let handle = _tables.clone().lock().unwrap().events_table.insert(());
-        Ok(handle as i32)
+    // fn events_get(caller: wasmtime::Caller<'_, Self::Context>) -> Result<i32, wasmtime::Trap> {
+    //     let store = caller.as_context();
+    //     let _tables = store.data().host.1.as_ref().unwrap();
+    //     let handle = _tables.clone().lock().unwrap().events_table.insert(());
+    //     Ok(handle as i32)
+    // }
+
+    // fn events_exec(
+    //     mut caller: wasmtime::Caller<'_, Self::Context>,
+    //     _arg0: i32,
+    // ) -> Result<(), wasmtime::Trap> {
+    //     let mut thread_handles = vec![];
+    //     for i in 0..10 {
+    //         let store = caller.as_context();
+    //         let handler = store.data().host.0.as_ref().unwrap().clone();
+    //         let mut store = caller.as_context_mut();
+    //         let store = store.data_mut().host.2.as_mut().unwrap().clone();
+    //         thread_handles.push(thread::spawn(move || {
+    //             let mut store = store.lock().unwrap();
+    //             let _res = handler
+    //                 .lock()
+    //                 .unwrap()
+    //                 .event_handler(store.deref_mut(), format!("event-{i}").as_str());
+    //         }));
+    //     }
+    //     for handle in thread_handles {
+    //         handle.join().unwrap();
+    //     }
+    //     Ok(())
+    // }
+
+    fn events_get(
+        mut caller: wasmtime::Caller<'_, Self::Context>,
+        arg0: i32,
+    ) -> Result<(), wasmtime::Trap> {
+        let memory = &get_memory(&mut caller, "memory")?;
+        let _store = caller.as_context();
+        let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+        let _tables = data.host.1.as_ref().unwrap();
+        caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
+        caller_memory.store(
+            arg0 + 4,
+            wit_bindgen_wasmtime::rt::as_i32(
+                _tables.clone().lock().unwrap().events_table.insert(()) as i32,
+            ),
+        )?;
+        Ok(())
+    }
+
+    fn events_listen(
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+        _arg1: i32,
+        _arg2: i32,
+        _arg3: i32,
+        _arg4: i32,
+        _arg5: i32,
+    ) -> Result<(), wasmtime::Trap> {
+        todo!()
     }
 
     fn events_exec(
         mut caller: wasmtime::Caller<'_, Self::Context>,
         _arg0: i32,
+        _arg1: i64,
+        arg2: i32,
     ) -> Result<(), wasmtime::Trap> {
+        let memory = &get_memory(&mut caller, "memory")?;
         let mut thread_handles = vec![];
         for i in 0..10 {
             let store = caller.as_context();
@@ -138,6 +196,8 @@ impl Exec for HostContext {
         for handle in thread_handles {
             handle.join().unwrap();
         }
+        let (caller_memory, _) = memory.data_and_store_mut(&mut caller);
+        caller_memory.store(arg2 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
         Ok(())
     }
 
@@ -179,13 +239,30 @@ impl Ctx for GuestContext {
 impl Exec for GuestContext {
     type Context = Self;
 
-    fn events_get(_caller: wasmtime::Caller<'_, Self::Context>) -> Result<i32, wasmtime::Trap> {
-        Ok(0)
+    fn events_listen(
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+        _arg1: i32,
+        _arg2: i32,
+        _arg3: i32,
+        _arg4: i32,
+        _arg5: i32,
+    ) -> Result<(), wasmtime::Trap> {
+        Ok(())
+    }
+
+    fn events_get(
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+    ) -> Result<(), wasmtime::Trap> {
+        Ok(())
     }
 
     fn events_exec(
         _caller: wasmtime::Caller<'_, Self::Context>,
         _arg0: i32,
+        _arg1: i64,
+        _arg2: i32,
     ) -> Result<(), wasmtime::Trap> {
         Ok(())
     }
