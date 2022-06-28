@@ -68,14 +68,14 @@ pub mod exec {
         linker.func_wrap(
             "exec",
             "events::get",
-            move |mut caller: wasmtime::Caller<'_, T::Context>, arg0: i32| {
+            move |caller: wasmtime::Caller<'_, T::Context>, arg0: i32| {
                 T::events_get(caller, arg0)
             },
         )?;
         linker.func_wrap(
             "exec",
             "events::listen",
-            move |mut caller: wasmtime::Caller<'_, T::Context>,
+            move |caller: wasmtime::Caller<'_, T::Context>,
                   arg0: i32,
                   arg1: i32,
                   arg2: i32,
@@ -88,7 +88,7 @@ pub mod exec {
         linker.func_wrap(
             "exec",
             "events::exec",
-            move |mut caller: wasmtime::Caller<'_, T::Context>, arg0: i32, arg1: i64, arg2: i32| {
+            move |caller: wasmtime::Caller<'_, T::Context>, arg0: i32, arg1: i64, arg2: i32| {
                 T::events_exec(caller, arg0, arg1, arg2)
             },
         )?;

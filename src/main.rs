@@ -11,7 +11,7 @@ use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
 use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
-use wit_bindgen_wasmtime::rt::{get_func, get_memory, RawMem};
+use wit_bindgen_wasmtime::rt::{get_memory, RawMem};
 
 mod host;
 
@@ -147,7 +147,7 @@ impl Exec for HostContext {
         arg0: i32,
     ) -> Result<(), wasmtime::Trap> {
         let memory = &get_memory(&mut caller, "memory")?;
-        let store = caller.as_context();
+        let _store = caller.as_context();
         let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
         let _tables = data.host.1.as_ref().unwrap();
         caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
@@ -161,21 +161,21 @@ impl Exec for HostContext {
     }
 
     fn events_listen(
-        caller: wasmtime::Caller<'_, Self::Context>,
-        arg0: i32,
-        arg1: i32,
-        arg2: i32,
-        arg3: i32,
-        arg4: i32,
-        arg5: i32,
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+        _arg1: i32,
+        _arg2: i32,
+        _arg3: i32,
+        _arg4: i32,
+        _arg5: i32,
     ) -> Result<(), wasmtime::Trap> {
         todo!()
     }
 
     fn events_exec(
         mut caller: wasmtime::Caller<'_, Self::Context>,
-        arg0: i32,
-        arg1: i64,
+        _arg0: i32,
+        _arg1: i64,
         arg2: i32,
     ) -> Result<(), wasmtime::Trap> {
         let memory = &get_memory(&mut caller, "memory")?;
@@ -240,36 +240,36 @@ impl Exec for GuestContext {
     type Context = Self;
 
     fn events_listen(
-        caller: wasmtime::Caller<'_, Self::Context>,
-        arg0: i32,
-        arg1: i32,
-        arg2: i32,
-        arg3: i32,
-        arg4: i32,
-        arg5: i32,
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+        _arg1: i32,
+        _arg2: i32,
+        _arg3: i32,
+        _arg4: i32,
+        _arg5: i32,
     ) -> Result<(), wasmtime::Trap> {
         Ok(())
     }
 
     fn events_get(
-        caller: wasmtime::Caller<'_, Self::Context>,
+        _caller: wasmtime::Caller<'_, Self::Context>,
         _arg0: i32,
     ) -> Result<(), wasmtime::Trap> {
         Ok(())
     }
 
     fn events_exec(
-        caller: wasmtime::Caller<'_, Self::Context>,
-        arg0: i32,
-        arg1: i64,
-        arg2: i32,
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _arg0: i32,
+        _arg1: i64,
+        _arg2: i32,
     ) -> Result<(), wasmtime::Trap> {
         Ok(())
     }
 
     fn drop_events(
-        caller: wasmtime::Caller<'_, Self::Context>,
-        handle: u32,
+        _caller: wasmtime::Caller<'_, Self::Context>,
+        _handle: u32,
     ) -> Result<(), wasmtime::Trap> {
         Ok(())
     }
