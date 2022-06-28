@@ -6,14 +6,12 @@ use std::{
 
 use anyhow::Result;
 use event_handler::{EventHandler, EventHandlerData};
-use host::events::{self, Exec, ExecTables};
+use events::{self, Exec, ExecTables};
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
 use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
 use wit_bindgen_wasmtime::rt::{get_memory, RawMem};
-
-mod host;
 
 wit_bindgen_wasmtime::import!("event-handler.wit");
 
