@@ -5,7 +5,7 @@ variant error {
 }
 
 resource events {
-	static get: function() -> expected<events, error>
-	listen: function(ob: observable) -> expected<events, error>
-	exec: function(duration: u64) -> expected<unit, error>
+	static get: function() -> events
+	listen: function(ob: observable) -> events
+	exec: function(duration: u64) -> unit
 }
