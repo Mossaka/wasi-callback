@@ -11,7 +11,7 @@ use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
 use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::*;
-use wit_bindgen_wasmtime::rt::{get_memory, RawMem};
+use wit_bindgen_wasmtime::rt::{get_func, get_memory, RawMem};
 
 wit_bindgen_wasmtime::import!("event-handler.wit");
 
@@ -37,7 +37,7 @@ fn main() -> Result<()> {
     })?;
     store.data_mut().host = (
         Some(Arc::new(Mutex::new(handler))),
-        Some(Arc::new(Mutex::new(ExecTables::default()))),
+        Some(ExecTables::default()),
         Some(Arc::new(Mutex::new(store2))),
     );
     instance
@@ -113,17 +113,44 @@ impl Exec for HostContext {
         mut caller: wasmtime::Caller<'_, Self::Context>,
         arg0: i32,
     ) -> Result<(), wasmtime::Trap> {
+        let func = get_func(&mut caller, "canonical_abi_realloc")?;
+        let func_canonical_abi_realloc = func.typed::<(i32, i32, i32, i32), i32, _>(&caller)?;
         let memory = &get_memory(&mut caller, "memory")?;
-        let _store = caller.as_context();
-        let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-        let _tables = data.host.1.as_ref().unwrap();
-        caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
-        caller_memory.store(
-            arg0 + 4,
-            wit_bindgen_wasmtime::rt::as_i32(
-                _tables.clone().lock().unwrap().events_table.insert(()) as i32,
-            ),
-        )?;
+        let _tables = caller.data_mut().host.1.as_mut().unwrap();
+        let result = Ok(());
+        match result {
+            Ok(e) => {
+                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+                let _tables = data.host.1.as_mut().unwrap();
+                caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
+                caller_memory.store(
+                    arg0 + 4,
+                    wit_bindgen_wasmtime::rt::as_i32(_tables.events_table.insert(e) as i32),
+                )?;
+            }
+            Err(e) => {
+                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+                let _tables = data.host.1.as_mut().unwrap();
+                caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(1i32) as u8)?;
+                match e {
+                    events::Error::ErrorWithDescription(e) => {
+                        caller_memory
+                            .store(arg0 + 4, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
+                        let vec0 = e;
+                        let ptr0 = func_canonical_abi_realloc
+                            .call(&mut caller, (0, 0, 1, vec0.len() as i32))?;
+                        let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+                        let _tables = data.host.1.as_mut().unwrap();
+                        caller_memory.store_many(ptr0, vec0.as_bytes())?;
+                        caller_memory.store(
+                            arg0 + 12,
+                            wit_bindgen_wasmtime::rt::as_i32(vec0.len() as i32),
+                        )?;
+                        caller_memory.store(arg0 + 8, wit_bindgen_wasmtime::rt::as_i32(ptr0))?;
+                    }
+                };
+            }
+        };
         Ok(())
     }
 
@@ -141,17 +168,23 @@ impl Exec for HostContext {
 
     fn events_exec(
         mut caller: wasmtime::Caller<'_, Self::Context>,
-        _arg0: i32,
-        _arg1: i64,
+        arg0: i32,
+        arg1: i64,
         arg2: i32,
     ) -> Result<(), wasmtime::Trap> {
+        let func = get_func(&mut caller, "canonical_abi_realloc")?;
+        let func_canonical_abi_realloc = func.typed::<(i32, i32, i32, i32), i32, _>(&caller)?;
         let memory = &get_memory(&mut caller, "memory")?;
+        let _tables = caller.data_mut().host.1.as_mut().unwrap();
+        let param0 = _tables
+            .events_table
+            .get((arg0) as u32)
+            .ok_or_else(|| wasmtime::Trap::new("invalid handle index"))?;
+        let param1 = arg1 as u64;
         let mut thread_handles = vec![];
         for i in 0..10 {
-            let store = caller.as_context();
-            let handler = store.data().host.0.as_ref().unwrap().clone();
-            let mut store = caller.as_context_mut();
-            let store = store.data_mut().host.2.as_mut().unwrap().clone();
+            let handler = caller.data_mut().host.0.as_ref().unwrap().clone();
+            let store = caller.data_mut().host.2.as_mut().unwrap().clone();
             thread_handles.push(thread::spawn(move || {
                 let mut store = store.lock().unwrap();
                 let _res = handler
@@ -163,21 +196,46 @@ impl Exec for HostContext {
         for handle in thread_handles {
             handle.join().unwrap();
         }
-        let (caller_memory, _) = memory.data_and_store_mut(&mut caller);
-        caller_memory.store(arg2 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
+        let result = Ok(());
+        match result {
+            Ok(e) => {
+                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+                let _tables = data.host.1.as_mut().unwrap();
+                caller_memory.store(arg2 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
+                let () = e;
+            }
+            Err(e) => {
+                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+                let _tables = data.host.1.as_mut().unwrap();
+                caller_memory.store(arg2 + 0, wit_bindgen_wasmtime::rt::as_i32(1i32) as u8)?;
+                match e {
+                    events::Error::ErrorWithDescription(e) => {
+                        caller_memory
+                            .store(arg2 + 4, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
+                        let vec0 = e;
+                        let ptr0 = func_canonical_abi_realloc
+                            .call(&mut caller, (0, 0, 1, vec0.len() as i32))?;
+                        let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
+                        let _tables = data.host.1.as_mut().unwrap();
+                        caller_memory.store_many(ptr0, vec0.as_bytes())?;
+                        caller_memory.store(
+                            arg2 + 12,
+                            wit_bindgen_wasmtime::rt::as_i32(vec0.len() as i32),
+                        )?;
+                        caller_memory.store(arg2 + 8, wit_bindgen_wasmtime::rt::as_i32(ptr0))?;
+                    }
+                };
+            }
+        };
         Ok(())
     }
 
     fn drop_events(
-        caller: wasmtime::Caller<'_, Self::Context>,
+        mut caller: wasmtime::Caller<'_, Self::Context>,
         handle: u32,
     ) -> Result<(), wasmtime::Trap> {
-        let store = caller.as_context();
-        let _tables = store.data().host.1.as_ref().unwrap();
+        let _tables = caller.data_mut().host.1.as_mut().unwrap();
         _tables
-            .clone()
-            .lock()
-            .unwrap()
             .events_table
             .remove(handle)
             .map_err(|e| wasmtime::Trap::new(format!("failed to remove handle: {}", e)))?;
@@ -245,6 +303,6 @@ impl Exec for GuestContext {
 type GuestStore = Store<GuestContext>;
 type HostData = (
     Option<Arc<Mutex<EventHandler<GuestContext>>>>,
-    Option<Arc<Mutex<ExecTables>>>,
+    Option<ExecTables>,
     Option<Arc<Mutex<GuestStore>>>,
 );
