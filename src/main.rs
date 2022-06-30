@@ -6,43 +6,106 @@ use std::{
 
 use anyhow::Result;
 use event_handler::{EventHandler, EventHandlerData};
-use events::{self, Exec, ExecTables};
+// use events::ExecTables;
 use wasi_cap_std_sync::WasiCtxBuilder;
 use wasi_common::{StringArrayError, WasiCtx};
-use wasmtime::{AsContext, AsContextMut, Config, Engine, Linker, Module, Store};
+use wasmtime::{Config, Engine, Instance, Linker, Module, Store};
 use wasmtime_wasi::*;
-use wit_bindgen_wasmtime::rt::{get_func, get_memory, RawMem};
 
 wit_bindgen_wasmtime::import!("event-handler.wit");
+wit_bindgen_wasmtime::export!("exec.wit");
+
+#[derive(Default)]
+pub struct Exec {
+    guest_handler: Option<Arc<Mutex<EventHandler<GuestContext>>>>,
+    guest_store: Option<Arc<Mutex<Store<GuestContext>>>>,
+    observables: Vec<MyObservable>,
+}
+
+impl exec::Exec for Exec {
+    type Events = ();
+
+    fn events_get(&mut self) -> Result<Self::Events, exec::Error> {
+        Ok(())
+    }
+
+    fn events_listen(
+        &mut self,
+        _self_: &Self::Events,
+        ob: exec::Observable<'_>,
+    ) -> Result<Self::Events, exec::Error> {
+        let _ob = MyObservable {
+            rd: ob.rd.to_string(),
+            key: ob.key.to_string(),
+        };
+        self.observables.push(_ob);
+        Ok(())
+    }
+
+    fn events_exec(&mut self, _self_: &Self::Events, _duration: u64) -> Result<(), exec::Error> {
+        let mut thread_handles = vec![];
+        for i in 0..10 {
+            let handler = self.guest_handler.as_ref().unwrap().clone();
+            let store = self.guest_store.as_mut().unwrap().clone();
+            thread_handles.push(thread::spawn(move || {
+                let mut store = store.lock().unwrap();
+                let _res = handler
+                    .lock()
+                    .unwrap()
+                    .event_handler(store.deref_mut(), format!("event-{i}").as_str());
+            }));
+        }
+        for handle in thread_handles {
+            handle.join().unwrap();
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct GuestExec {
+    data: EventHandlerData,
+}
+
+impl exec::Exec for GuestExec {
+    type Events = ();
+
+    fn events_get(&mut self) -> Result<Self::Events, exec::Error> {
+        Ok(())
+    }
+
+    fn events_listen(
+        &mut self,
+        _self_: &Self::Events,
+        _ob: exec::Observable<'_>,
+    ) -> Result<Self::Events, exec::Error> {
+        Ok(())
+    }
+
+    fn events_exec(&mut self, _self_: &Self::Events, _duration: u64) -> Result<(), exec::Error> {
+        Ok(())
+    }
+}
 
 fn main() -> Result<()> {
-    let guest = EventHandlerData::default();
-    let ctx = HostContext {
-        wasi: default_wasi()?,
-        host: (None, None, None),
-    };
-
-    let ctx2 = GuestContext {
-        wasi: default_wasi()?,
-        guest,
-    };
     let engine = Engine::new(&default_config()?)?;
     let path = "target/wasm32-wasi/release/demo.wasm";
-    let (mut store, instance) = wasmtime_init(&engine, ctx, path)?;
-    let (mut store2, instance2) = wasmtime_init(&engine, ctx2, path)?;
 
-    // put dummy implementation to these import functions
+    let (mut store, _linker, instance) = wasmtime_init(&engine, path)?;
+    let (mut store2, _linker2, instance2) = wasmtime_init(&engine, path)?;
+
     let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut GuestContext| {
-        &mut cx.guest
+        &mut cx.host.data
     })?;
-    store.data_mut().host = (
-        Some(Arc::new(Mutex::new(handler))),
-        Some(ExecTables::default()),
-        Some(Arc::new(Mutex::new(store2))),
-    );
+    store.data_mut().host = Exec {
+        guest_handler: Some(Arc::new(Mutex::new(handler))),
+        guest_store: Some(Arc::new(Mutex::new(store2))),
+        observables: vec![],
+    };
     instance
         .get_typed_func::<(), (), _>(&mut store, "_start")?
         .call(&mut store, ())?;
+
     Ok(())
 }
 
@@ -66,243 +129,49 @@ pub fn default_wasi() -> Result<WasiCtx, StringArrayError> {
     Ok(ctx.build())
 }
 
-pub fn wasmtime_init<T>(
+pub fn wasmtime_init<T: exec::Exec + Default>(
     engine: &Engine,
-    ctx: T,
     path: &str,
-) -> Result<(Store<T>, wasmtime::Instance)>
+) -> Result<(Store<Context<T>>, Linker<Context<T>>, Instance)>
 where
-    T: Ctx + Exec<Context = T>,
 {
+    let ctx = Context::default();
     let mut linker = Linker::new(engine);
     let mut store = Store::new(engine, ctx);
-    wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut T| cx.wasi_mut())?;
     let module = Module::from_file(engine, path)?;
-    events::add_to_linker::<T>(&mut linker)?;
+    wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut Context<T>| &mut cx.wasi)?;
+    exec::add_to_linker(&mut linker, |cx: &mut Context<T>| {
+        (&mut cx.host, &mut cx.host_tables)
+    })?;
     let instance = linker.instantiate(&mut store, &module)?;
-    Ok((store, instance))
+    Ok((store, linker, instance))
 }
 
-pub trait Ctx {
-    type Data;
-    fn wasi_mut(&mut self) -> &mut WasiCtx;
-    fn data_mut(&mut self) -> &mut Self::Data;
-}
-
-pub struct HostContext {
+pub struct Context<T>
+where
+    T: exec::Exec + Default,
+{
     pub wasi: WasiCtx,
-    pub host: HostData,
+    pub host: T,
+    pub host_tables: exec::ExecTables<T>,
 }
 
-impl Ctx for HostContext {
-    type Data = HostData;
-
-    fn wasi_mut(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-
-    fn data_mut(&mut self) -> &mut Self::Data {
-        &mut self.host
-    }
-}
-
-impl Exec for HostContext {
-    type Context = Self;
-
-    fn events_get(
-        mut caller: wasmtime::Caller<'_, Self::Context>,
-        arg0: i32,
-    ) -> Result<(), wasmtime::Trap> {
-        let func = get_func(&mut caller, "canonical_abi_realloc")?;
-        let func_canonical_abi_realloc = func.typed::<(i32, i32, i32, i32), i32, _>(&caller)?;
-        let memory = &get_memory(&mut caller, "memory")?;
-        let _tables = caller.data_mut().host.1.as_mut().unwrap();
-        let result = Ok(());
-        match result {
-            Ok(e) => {
-                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-                let _tables = data.host.1.as_mut().unwrap();
-                caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
-                caller_memory.store(
-                    arg0 + 4,
-                    wit_bindgen_wasmtime::rt::as_i32(_tables.events_table.insert(e) as i32),
-                )?;
-            }
-            Err(e) => {
-                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-                let _tables = data.host.1.as_mut().unwrap();
-                caller_memory.store(arg0 + 0, wit_bindgen_wasmtime::rt::as_i32(1i32) as u8)?;
-                match e {
-                    events::Error::ErrorWithDescription(e) => {
-                        caller_memory
-                            .store(arg0 + 4, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
-                        let vec0 = e;
-                        let ptr0 = func_canonical_abi_realloc
-                            .call(&mut caller, (0, 0, 1, vec0.len() as i32))?;
-                        let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-                        let _tables = data.host.1.as_mut().unwrap();
-                        caller_memory.store_many(ptr0, vec0.as_bytes())?;
-                        caller_memory.store(
-                            arg0 + 12,
-                            wit_bindgen_wasmtime::rt::as_i32(vec0.len() as i32),
-                        )?;
-                        caller_memory.store(arg0 + 8, wit_bindgen_wasmtime::rt::as_i32(ptr0))?;
-                    }
-                };
-            }
-        };
-        Ok(())
-    }
-
-    fn events_listen(
-        _caller: wasmtime::Caller<'_, Self::Context>,
-        _arg0: i32,
-        _arg1: i32,
-        _arg2: i32,
-        _arg3: i32,
-        _arg4: i32,
-        _arg5: i32,
-    ) -> Result<(), wasmtime::Trap> {
-        todo!()
-    }
-
-    fn events_exec(
-        mut caller: wasmtime::Caller<'_, Self::Context>,
-        arg0: i32,
-        arg1: i64,
-        arg2: i32,
-    ) -> Result<(), wasmtime::Trap> {
-        let func = get_func(&mut caller, "canonical_abi_realloc")?;
-        let func_canonical_abi_realloc = func.typed::<(i32, i32, i32, i32), i32, _>(&caller)?;
-        let memory = &get_memory(&mut caller, "memory")?;
-        let _tables = caller.data_mut().host.1.as_mut().unwrap();
-        let param0 = _tables
-            .events_table
-            .get((arg0) as u32)
-            .ok_or_else(|| wasmtime::Trap::new("invalid handle index"))?;
-        let param1 = arg1 as u64;
-        let mut thread_handles = vec![];
-        for i in 0..10 {
-            let handler = caller.data_mut().host.0.as_ref().unwrap().clone();
-            let store = caller.data_mut().host.2.as_mut().unwrap().clone();
-            thread_handles.push(thread::spawn(move || {
-                let mut store = store.lock().unwrap();
-                let _res = handler
-                    .lock()
-                    .unwrap()
-                    .event_handler(store.deref_mut(), format!("event-{i}").as_str());
-            }));
+impl<T> Default for Context<T>
+where
+    T: exec::Exec + Default,
+{
+    fn default() -> Self {
+        Self {
+            wasi: default_wasi().unwrap(),
+            host: Default::default(),
+            host_tables: Default::default(),
         }
-        for handle in thread_handles {
-            handle.join().unwrap();
-        }
-        let result = Ok(());
-        match result {
-            Ok(e) => {
-                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-                let _tables = data.host.1.as_mut().unwrap();
-                caller_memory.store(arg2 + 0, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
-                let () = e;
-            }
-            Err(e) => {
-                let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-                let _tables = data.host.1.as_mut().unwrap();
-                caller_memory.store(arg2 + 0, wit_bindgen_wasmtime::rt::as_i32(1i32) as u8)?;
-                match e {
-                    events::Error::ErrorWithDescription(e) => {
-                        caller_memory
-                            .store(arg2 + 4, wit_bindgen_wasmtime::rt::as_i32(0i32) as u8)?;
-                        let vec0 = e;
-                        let ptr0 = func_canonical_abi_realloc
-                            .call(&mut caller, (0, 0, 1, vec0.len() as i32))?;
-                        let (caller_memory, data) = memory.data_and_store_mut(&mut caller);
-                        let _tables = data.host.1.as_mut().unwrap();
-                        caller_memory.store_many(ptr0, vec0.as_bytes())?;
-                        caller_memory.store(
-                            arg2 + 12,
-                            wit_bindgen_wasmtime::rt::as_i32(vec0.len() as i32),
-                        )?;
-                        caller_memory.store(arg2 + 8, wit_bindgen_wasmtime::rt::as_i32(ptr0))?;
-                    }
-                };
-            }
-        };
-        Ok(())
-    }
-
-    fn drop_events(
-        mut caller: wasmtime::Caller<'_, Self::Context>,
-        handle: u32,
-    ) -> Result<(), wasmtime::Trap> {
-        let _tables = caller.data_mut().host.1.as_mut().unwrap();
-        _tables
-            .events_table
-            .remove(handle)
-            .map_err(|e| wasmtime::Trap::new(format!("failed to remove handle: {}", e)))?;
-        drop(handle);
-        Ok(())
     }
 }
 
-pub struct GuestContext {
-    pub wasi: WasiCtx,
-    pub guest: EventHandlerData,
+pub struct MyObservable {
+    pub rd: String,
+    pub key: String,
 }
 
-impl Ctx for GuestContext {
-    type Data = EventHandlerData;
-
-    fn wasi_mut(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-
-    fn data_mut(&mut self) -> &mut Self::Data {
-        &mut self.guest
-    }
-}
-
-impl Exec for GuestContext {
-    type Context = Self;
-
-    fn events_listen(
-        _caller: wasmtime::Caller<'_, Self::Context>,
-        _arg0: i32,
-        _arg1: i32,
-        _arg2: i32,
-        _arg3: i32,
-        _arg4: i32,
-        _arg5: i32,
-    ) -> Result<(), wasmtime::Trap> {
-        Ok(())
-    }
-
-    fn events_get(
-        _caller: wasmtime::Caller<'_, Self::Context>,
-        _arg0: i32,
-    ) -> Result<(), wasmtime::Trap> {
-        Ok(())
-    }
-
-    fn events_exec(
-        _caller: wasmtime::Caller<'_, Self::Context>,
-        _arg0: i32,
-        _arg1: i64,
-        _arg2: i32,
-    ) -> Result<(), wasmtime::Trap> {
-        Ok(())
-    }
-
-    fn drop_events(
-        _caller: wasmtime::Caller<'_, Self::Context>,
-        _handle: u32,
-    ) -> Result<(), wasmtime::Trap> {
-        Ok(())
-    }
-}
-
-type GuestStore = Store<GuestContext>;
-type HostData = (
-    Option<Arc<Mutex<EventHandler<GuestContext>>>>,
-    Option<ExecTables>,
-    Option<Arc<Mutex<GuestStore>>>,
-);
+pub type GuestContext = Context<GuestExec>;
