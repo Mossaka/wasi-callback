@@ -31,7 +31,7 @@ impl exec::Exec for Exec {
 
     fn events_listen(
         &mut self,
-        self_: &Self::Events,
+        _self_: &Self::Events,
         ob: exec::Observable<'_>,
     ) -> Result<Self::Events, exec::Error> {
         let _ob = MyObservable {
@@ -42,7 +42,7 @@ impl exec::Exec for Exec {
         Ok(())
     }
 
-    fn events_exec(&mut self, self_: &Self::Events, duration: u64) -> Result<(), exec::Error> {
+    fn events_exec(&mut self, _self_: &Self::Events, _duration: u64) -> Result<(), exec::Error> {
         let mut thread_handles = vec![];
         for i in 0..10 {
             let handler = self.guest_handler.as_ref().unwrap().clone();
@@ -76,13 +76,13 @@ impl exec::Exec for GuestExec {
 
     fn events_listen(
         &mut self,
-        self_: &Self::Events,
-        ob: exec::Observable<'_>,
+        _self_: &Self::Events,
+        _ob: exec::Observable<'_>,
     ) -> Result<Self::Events, exec::Error> {
         Ok(())
     }
 
-    fn events_exec(&mut self, self_: &Self::Events, duration: u64) -> Result<(), exec::Error> {
+    fn events_exec(&mut self, _self_: &Self::Events, _duration: u64) -> Result<(), exec::Error> {
         Ok(())
     }
 }
@@ -91,8 +91,8 @@ fn main() -> Result<()> {
     let engine = Engine::new(&default_config()?)?;
     let path = "target/wasm32-wasi/release/demo.wasm";
 
-    let (mut store, mut linker, instance) = wasmtime_init(&engine, path)?;
-    let (mut store2, mut linker2, instance2) = wasmtime_init(&engine, path)?;
+    let (mut store, _linker, instance) = wasmtime_init(&engine, path)?;
+    let (mut store2, _linker2, instance2) = wasmtime_init(&engine, path)?;
 
     let handler = EventHandler::new(&mut store2, &instance2, |cx: &mut GuestContext| {
         &mut cx.host.data
@@ -136,9 +136,9 @@ pub fn wasmtime_init<T: exec::Exec + Default>(
 where
 {
     let ctx = Context::default();
-    let mut linker = Linker::new(&engine);
-    let mut store = Store::new(&engine, ctx);
-    let module = Module::from_file(&engine, path)?;
+    let mut linker = Linker::new(engine);
+    let mut store = Store::new(engine, ctx);
+    let module = Module::from_file(engine, path)?;
     wasmtime_wasi::add_to_linker(&mut linker, |cx: &mut Context<T>| &mut cx.wasi)?;
     exec::add_to_linker(&mut linker, |cx: &mut Context<T>| {
         (&mut cx.host, &mut cx.host_tables)
